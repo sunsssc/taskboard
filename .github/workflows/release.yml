@@ -35,13 +35,15 @@ jobs:
             --revision "$GITHUB_SHA" \
             --output-dir dist/homebrew
 
-      - name: Require tap publishing token
+      - name: Check for tap publishing token
+        id: tap
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          if [[ -z "$HOMEBREW_TAP_TOKEN" ]]; then
-            echo "::error::Set HOMEBREW_TAP_TOKEN with contents:write access to homebrew-tap"
-            exit 1
+          if [[ -n "$HOMEBREW_TAP_TOKEN" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set; attach taskboard.rb to the release and update the tap by hand"
           fi
 
       - name: Publish GitHub release
@@ -51,16 +53,19 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" \
             "dist/homebrew/taskboard-${version}.tar.gz" \
+            dist/homebrew/taskboard.rb \
             --generate-notes \
             --title "Taskboard ${version}"
 
       - uses: actions/checkout@v4
+        if: steps.tap.outputs.publish == 'true'
         with:
           repository: ${{ github.repository_owner }}/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
       - name: Update Homebrew tap
+        if: steps.tap.outputs.publish == 'true'
         run: |
           mkdir -p homebrew-tap/Formula
           cp dist/homebrew/taskboard.rb homebrew-tap/Formula/taskboard.rb

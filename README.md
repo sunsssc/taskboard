@@ -1,99 +1,93 @@
 # taskboard
 
-给个人和 AI 编程助手用的跨对话需求看板。和 Claude Code、Codex 长对话时，计划会滚出上下文；
-一个需求跨多个仓库推进时，"现在能开工的是哪几件、谁卡着谁"没有统一的去处。taskboard 把
-任务、依赖、结论和风险存进本地 SQLite，新会话读一段摘要就能接上。
+English · [中文](README.zh.md)
 
-纯标准库 Python，无第三方依赖；数据在 `~/.taskboard/board.db`。不做多人协作、权限或云同步。
+A task board for one person working with AI coding agents. In long Claude Code or Codex sessions the plan scrolls out of context, and when one piece of work spans several repos there is no single place that says what can start now and what is blocked. taskboard keeps tasks, dependencies, findings and risks in a local SQLite database, so a new session can pick up the work from a short brief.
+
+It is standard-library Python with no third-party dependencies, and stores data in `~/.taskboard/board.db`. It does not do multi-user collaboration, permissions or cloud sync. The CLI and UI text are in Chinese.
 
 ```mermaid
 flowchart TD
-    A["长对话 + 多仓库<br/>计划与结论容易丢"] --> B["新会话先读<br/>board next + board notes"]
-    B --> C["只拿到当前可执行路径<br/>可开工任务 + 已定结论"]
-    C --> D["推进<br/>start / wait / done"]
-    D --> E["沉淀<br/>finding / risk / link"]
-    E --> F[("~/.taskboard/board.db<br/>SQLite 单一事实源")]
+    A["Long sessions, many repos:<br/>plans and conclusions get lost"] --> B["New session reads<br/>board next + board notes"]
+    B --> C["Gets only what can run now:<br/>ready tasks + settled findings"]
+    C --> D["Moves work<br/>start / wait / done"]
+    D --> E["Records results<br/>finding / risk / link"]
+    E --> F[("~/.taskboard/board.db<br/>single source of truth")]
     F --> B
-    F --> G["CLI · 网页 / 桌面版 · 静态 HTML / JSON"]
+    F --> G["CLI · web / desktop · static HTML / JSON"]
 ```
 
-## 安装
+## Install
 
 ```bash
-pip install -e /path/to/taskboard   # 得到全局命令 board；TASKBOARD_HOME 可改数据目录
+brew install sunsssc/tap/taskboard
 ```
 
-## 接入 AI Agent
+Or from source: `pip install -e /path/to/taskboard`. Both give you the `board` command; set `TASKBOARD_HOME` to move the data directory. Homebrew puts the Agent Skill at `$(brew --prefix)/share/taskboard/skill`.
 
-Agent Skill 的唯一来源是 `.agents/skills/taskboard`。
+## Connect your agents
 
-- **Codex / Claude Code**：`board skill-sync` 同步到两端的全局 skill 目录（`--dry-run` 预览，
-  `--target codex|claude` 只更新一端）。
-- **Cursor**：打开本仓库时自动发现；全局可用需软链到 `~/.agents/skills/taskboard`。
-- **Gemini CLI**：把 `SKILL.md` 软链为 `~/.gemini/taskboard.md`，并在 `~/.gemini/GEMINI.md`
-  里加一行 `@./taskboard.md`，然后 `/memory refresh`。
+The Agent Skill lives in `.agents/skills/taskboard`.
 
-## 上手
+- **Codex and Claude Code:** `board skill-sync` copies it into both global skill folders (`--dry-run` to preview, `--target codex|claude` for one side).
+- **Cursor:** found automatically inside this repo; for all projects, symlink it to `~/.agents/skills/taskboard`.
+- **Gemini CLI:** symlink `SKILL.md` to `~/.gemini/taskboard.md`, add the line `@./taskboard.md` to `~/.gemini/GEMINI.md`, then run `/memory refresh`.
+
+## Quick start
 
 ```bash
-# 登记需求和涉及的仓库
-board init website-refresh --name "网站改版" --repo ../website_backend --repo ../website_frontend
+# Register a piece of work and the repos it touches
+board init website-refresh --name "Website refresh" --repo ../website_backend --repo ../website_frontend
 
-# 加任务：优先级、依赖、闸门、验收条件
-board add "确认需求" --priority P1 --repo website_backend --repo website_frontend
-board add "实现页面" --priority P1 --blocked-by 1 --repo website_frontend --accept "核心流程冒烟通过"
-board add "发布上线" --gate --priority P0 --blocked-by 2 --repo website_backend
+# Add tasks with priority, dependencies, a release gate and acceptance criteria
+board add "Confirm scope" --priority P1 --repo website_backend --repo website_frontend
+board add "Build pages" --priority P1 --blocked-by 1 --repo website_frontend --accept "Core flow smoke test passes"
+board add "Release" --gate --priority P0 --blocked-by 2 --repo website_backend
 
-# 推进
+# Move work
 board start 1
-board wait 1      # 卡在人工或外部动作上
-board done 1      # 打印验收条件，记录提交区间，提示解锁了谁
+board wait 1      # blocked on a person or an outside step
+board done 1      # prints the acceptance criteria, records the commit range, shows what it unblocked
 
-# 看
-board brief       # 交接摘要，新会话读这一段就能接上
-board next        # 现在能开工的
-board review --queue   # 今天该读哪几条改动
+# Look
+board brief            # handover summary for a new session
+board next             # what can start now
+board review --queue   # which changes to read today
 ```
 
-`board --help` 列出全部命令。
+`board --help` lists every command.
 
-## 设计要点
+## Design
 
-- **三种状态分开**：`todo`、`active`、`waiting`。`waiting` 等的是人，不算可开工，
-  `board next` 单独列出。
-- **记录结论，不只记任务**：`finding`（已判定的事实，不再重复推演）、`risk`（不阻塞但别丢）、
-  `link`（关键文件入口），按主题分组。
-- **概念对齐**：Agent 用 `board concept` 写下人可能缺的概念和选型理由，锚在代码函数上；
-  只有人能 `board align`。锚点之后被改动的概念会转为"需重新对齐"。
-- **审查分诊**：`board review --queue` 按"有没有引入未对齐的概念"排序改动，而不是按改动
-  规模；每条附一行理由。对齐之后，对应改动会掉到"可跳过"。
-- **提交区间**：`start` 记各关联仓库的 HEAD，`done` 记终点，支持 git worktree；
-  rebase/squash 后区间失效会明说，不给错误的 diff。
-- **多仓库**：需求可关联多个仓库，多仓库需求里新建任务必须指明仓库，不静默猜测。
+- **Three states, kept apart.** `todo`, `active` and `waiting`. A `waiting` task is blocked on a person, so it never counts as ready; `board next` lists it separately.
+- **Findings, not just tasks.** `finding` records a settled fact so nobody re-derives it, `risk` records a loose end that does not block, and `link` points at a key file. Each is grouped by topic.
+- **Concept alignment.** An agent uses `board concept` to write down a concept the human may lack, with the reason for the choice, anchored to a function. Only a person can `board align` it. If the anchored code changes later, the concept goes back to "needs realignment".
+- **Review triage.** `board review --queue` ranks changes by whether they introduce concepts you have not aligned, not by size, and gives a one-line reason for each. Aligning a concept moves its changes to "can skip".
+- **Commit ranges.** `start` records each linked repo's HEAD and `done` records the end, including inside git worktrees. If a rebase or squash breaks the range, it says so instead of showing a wrong diff.
+- **Many repos.** A piece of work can span repos; in that case a new task must name its repos, so nothing is attached by guesswork.
 
-## 查看
+## Viewing
 
-| 入口 | 说明 |
+| Entry point | What it does |
 | --- | --- |
-| `board serve --open` | 本机网页，CLI 改动 2 秒内刷新，可改状态、优先级、对齐概念 |
-| Tauri 桌面版（`apps/desktop`） | 与网页同一份 Vue 页面，另可把任务派发给 Codex 或 Claude Code |
-| `board export --out board.html` | 自包含静态 HTML，默认隐藏本机路径，可直接发布 |
-| `board export --json` | 给其他工具用 |
-| macOS 菜单栏 App（`macos/`） | 原生 AppKit 壳，监听数据库变化自动刷新 |
+| `board serve --open` | Local web page that refreshes within 2 seconds of a CLI change; edits status, priority and concept alignment |
+| Tauri desktop app (`apps/desktop`) | The same Vue page, plus dispatching a task to Codex or Claude Code |
+| `board export --out board.html` | Self-contained static HTML that hides local paths by default |
+| `board export --json` | JSON for other tools |
+| macOS menu bar app (`macos/`) | Native AppKit shell that refreshes when the database changes |
 
-`board serve` 没有身份认证，只在本机地址监听时允许写入，不要暴露到公网。
+`board serve` has no login. It accepts writes only when bound to a local address; don't expose it to a network.
 
-## 开发
+## Development
 
 ```bash
 python3 -m pytest tests -q
 cd apps/desktop && npm run test && npm run build
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
-cd apps/desktop && npm run build:web   # 改了前端后重新生成 taskboard/web，连同产物提交
+cd apps/desktop && npm run build:web   # after frontend changes; commit the rebuilt taskboard/web
 ```
 
-数据模型、提交区间和并发的细节见 `taskboard/store.py` 与 `taskboard/gitref.py`；
-桌面版的开发约束见 [`apps/desktop/README.md`](apps/desktop/README.md)。
+Pushing a `v*` tag that matches `pyproject.toml` runs `.github/workflows/release.yml`, which tests, builds the source archive and Formula, and publishes the GitHub release. The data model and commit-range logic are in `taskboard/store.py` and `taskboard/gitref.py`; desktop notes are in [`apps/desktop/README.md`](apps/desktop/README.md).
 
 ## License
 
